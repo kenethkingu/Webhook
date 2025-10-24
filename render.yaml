@@ -7,3 +7,7 @@ services:
     envVars:
       - key: VERIFY_TOKEN
         value: ken_12345
+      - key: WHATSAPP_TOKEN
+        value: EAATn73IZCIJgBP8zuQWUr3LOrZCKy1yJifNrYovEJb5s0UQSe43xvBCPHmtcXvuYTpZCjd3U1h0nSZBdxXabEcqCgemWWZA00XNQFYPqZCYK7VrljIGElBCEUXZChmLCGDqJmFPZAOn2eMxRCVdg51aqicYgNluOLYoK3SyXW6SGM0N8I77UfblomE6ZCsB2yEVc9naBncccFZCGOVsjhtmwzFTde9BCxGJ9Em6GfIUIm53QZDZD
+      - key: PHONE_NUMBER_ID
+        value: 829658253562571
