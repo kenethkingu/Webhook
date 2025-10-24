@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: whatsapp-webhook
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: VERIFY_TOKEN
+        value: ken_12345
