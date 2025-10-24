@@ -5,10 +5,59 @@ const app = express();
 app.use(express.json());
 
 // Your verify token - choose any random string
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "your_verify_token_here";
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "Ken_12345";
 
 // Port configuration
 const PORT = process.env.PORT || 3000;
+
+// AUTO-REPLY FUNCTION - USING YOUR PHONE NUMBER ID
+async function sendAutoReply(phoneNumber, receivedMessage) {
+    const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN; // Your access token from Meta
+    const PHONE_NUMBER_ID = "829658253562571"; // Your actual Phone Number ID
+
+    let replyMessage = "";
+
+    // Customize your auto-reply logic here
+    const message = receivedMessage.toLowerCase();
+
+    if (message.includes('hello') || message.includes('hi') || message.includes('hey')) {
+        replyMessage = "Hello! 👋 Thanks for reaching out. How can I help you today?";
+    } else if (message.includes('price') || message.includes('cost')) {
+        replyMessage = "Thanks for your interest! Please visit our website for pricing details.";
+    } else if (message.includes('help') || message.includes('support')) {
+        replyMessage = "Our support team is here to help! Please describe your issue.";
+    } else if (message.includes('order') || message.includes('delivery')) {
+        replyMessage = "For order inquiries, please share your order number.";
+    } else if (message.includes('bulk') || message.includes('mass')) {
+        replyMessage = "We offer bulk messaging services! Contact us for pricing and features.";
+    } else {
+        replyMessage = "Thank you for your message! We've received it and will get back to you soon. 😊";
+    }
+
+    try {
+        const response = await fetch(`https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${ACCESS_TOKEN}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                messaging_product: "whatsapp",
+                to: phoneNumber,
+                text: { body: replyMessage }
+            })
+        });
+
+        const data = await response.json();
+        console.log('Auto-reply sent to:', phoneNumber);
+        console.log('API Response:', data);
+        
+        return data;
+    } catch (error) {
+        console.error('Error sending auto-reply:', error);
+        throw error;
+    }
+}
 
 // GET endpoint for webhook verification
 app.get('/webhook', (req, res) => {
@@ -40,12 +89,18 @@ app.post('/webhook', (req, res) => {
         console.log(JSON.stringify(body, null, 2));
 
         // Process the webhook data here
-        // For example, you can extract message data:
         if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages) {
             const messages = body.entry[0].changes[0].value.messages;
             messages.forEach(message => {
                 console.log('Message received from:', message.from);
                 console.log('Message text:', message.text?.body);
+                
+                // AUTO-REPLY LOGIC
+                if (message.text && message.text.body) {
+                    sendAutoReply(message.from, message.text.body)
+                        .then(() => console.log('Auto-reply sent to:', message.from))
+                        .catch(error => console.error('Auto-reply failed:', error));
+                }
             });
         }
 
@@ -65,5 +120,5 @@ app.get('/', (req, res) => {
 // Start the server
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
-    console.log(`Webhook URL will be: https://your-app-name.herokuapp.com/webhook`);
+    console.log(`Webhook URL: https://your-render-app.onrender.com/webhook`);
 });
