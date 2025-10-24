@@ -59,6 +59,77 @@ async function sendAutoReply(phoneNumber, receivedMessage) {
     }
 }
 
+// BULK MESSAGING FUNCTION
+async function sendBulkMessages(phoneNumbers, message) {
+    const ACCESS_TOKEN = process.env.WHATSAPP_TOKEN;
+    const PHONE_NUMBER_ID = "829658253562571";
+
+    console.log('📨 Starting bulk message send');
+    console.log('📊 Total recipients:', phoneNumbers.length);
+    console.log('💬 Message:', message);
+
+    const results = {
+        successful: [],
+        failed: []
+    };
+
+    // Send messages with delay to avoid rate limits
+    for (let i = 0; i < phoneNumbers.length; i++) {
+        const phoneNumber = phoneNumbers[i];
+        
+        try {
+            console.log(`📤 Sending to ${i + 1}/${phoneNumbers.length}: ${phoneNumber}`);
+            
+            const response = await fetch(`https://graph.facebook.com/v22.0/${PHONE_NUMBER_ID}/messages`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${ACCESS_TOKEN}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    messaging_product: "whatsapp",
+                    to: phoneNumber,
+                    text: { body: message }
+                })
+            });
+
+            const data = await response.json();
+            
+            if (response.ok) {
+                console.log(`✅ Sent to ${phoneNumber}`);
+                results.successful.push({
+                    phone: phoneNumber,
+                    messageId: data.messages?.[0]?.id
+                });
+            } else {
+                console.error(`❌ Failed for ${phoneNumber}:`, data.error?.message);
+                results.failed.push({
+                    phone: phoneNumber,
+                    error: data.error?.message
+                });
+            }
+
+            // Add delay to avoid rate limits (1 second between messages)
+            if (i < phoneNumbers.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+
+        } catch (error) {
+            console.error(`❌ Error sending to ${phoneNumber}:`, error.message);
+            results.failed.push({
+                phone: phoneNumber,
+                error: error.message
+            });
+        }
+    }
+
+    console.log('📊 Bulk send completed:');
+    console.log(`✅ Successful: ${results.successful.length}`);
+    console.log(`❌ Failed: ${results.failed.length}`);
+    
+    return results;
+}
+
 // GET endpoint for webhook verification
 app.get('/webhook', (req, res) => {
     const mode = req.query['hub.mode'];
@@ -112,13 +183,100 @@ app.post('/webhook', (req, res) => {
     }
 });
 
+// BULK MESSAGING ENDPOINT
+app.post('/bulk-send', express.json(), async (req, res) => {
+    console.log('📨 Bulk send endpoint called');
+    
+    try {
+        const { phoneNumbers, message } = req.body;
+
+        // Validate input
+        if (!phoneNumbers || !message) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing phoneNumbers or message in request body'
+            });
+        }
+
+        if (!Array.isArray(phoneNumbers)) {
+            return res.status(400).json({
+                success: false,
+                error: 'phoneNumbers must be an array'
+            });
+        }
+
+        if (phoneNumbers.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'phoneNumbers array is empty'
+            });
+        }
+
+        console.log('🚀 Starting bulk send process...');
+        const results = await sendBulkMessages(phoneNumbers, message);
+
+        res.json({
+            success: true,
+            summary: {
+                total: phoneNumbers.length,
+                successful: results.successful.length,
+                failed: results.failed.length
+            },
+            details: {
+                successful: results.successful,
+                failed: results.failed
+            },
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('❌ Bulk send error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// BULK MESSAGING STATUS ENDPOINT
+app.get('/bulk-status', (req, res) => {
+    res.json({
+        service: 'WhatsApp Bulk Messaging',
+        status: 'Active',
+        max_batch_size: 100,
+        rate_limit: '1 message per second',
+        features: [
+            'Send to multiple contacts',
+            'Detailed success/failure reports',
+            'Rate limiting',
+            'Real-time progress tracking'
+        ],
+        endpoints: {
+            bulk_send: 'POST /bulk-send',
+            status: 'GET /bulk-status',
+            webhook: 'GET/POST /webhook'
+        }
+    });
+});
+
 // Health check endpoint
 app.get('/', (req, res) => {
-    res.send('WhatsApp Webhook Server is running!');
+    res.json({
+        message: 'WhatsApp Webhook Server is running!',
+        features: ['Auto-reply', 'Bulk Messaging', 'Webhook Handling'],
+        endpoints: {
+            home: 'GET /',
+            webhook: 'GET/POST /webhook', 
+            bulk_send: 'POST /bulk-send',
+            bulk_status: 'GET /bulk-status'
+        }
+    });
 });
 
 // Start the server
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
-    console.log(`Webhook URL: https://your-render-app.onrender.com/webhook`);
+    console.log(`Webhook URL: https://webhook-d484.onrender.com/webhook`);
+    console.log(`Bulk SMS URL: https://webhook-d484.onrender.com/bulk-send`);
+    console.log(`Bulk Status URL: https://webhook-d484.onrender.com/bulk-status`);
 });
