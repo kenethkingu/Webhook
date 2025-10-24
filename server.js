@@ -1,8 +1,14 @@
 const express = require('express');
+const multer = require('multer');
+const csv = require('csv-parser');
+const fs = require('fs');
 const app = express();
 
 // Middleware to parse JSON bodies
 app.use(express.json());
+
+// Configure multer for file uploads
+const upload = multer({ dest: 'uploads/' });
 
 // Your verify token - choose any random string
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "Ken_12345";
@@ -12,12 +18,11 @@ const PORT = process.env.PORT || 3000;
 
 // AUTO-REPLY FUNCTION - USING YOUR PHONE NUMBER ID
 async function sendAutoReply(phoneNumber, receivedMessage) {
-    const ACCESS_TOKEN = process.env.WHATSAPP_TOKEN; // Your access token from Meta
-    const PHONE_NUMBER_ID = "829658253562571"; // Your actual Phone Number ID
+    const ACCESS_TOKEN = process.env.WHATSAPP_TOKEN;
+    const PHONE_NUMBER_ID = "829658253562571";
 
     let replyMessage = "";
 
-    // Customize your auto-reply logic here
     const message = receivedMessage.toLowerCase();
 
     if (message.includes('hello') || message.includes('hi') || message.includes('hey')) {
@@ -50,8 +55,6 @@ async function sendAutoReply(phoneNumber, receivedMessage) {
 
         const data = await response.json();
         console.log('Auto-reply sent to:', phoneNumber);
-        console.log('API Response:', data);
-        
         return data;
     } catch (error) {
         console.error('Error sending auto-reply:', error);
@@ -73,7 +76,6 @@ async function sendBulkMessages(phoneNumbers, message) {
         failed: []
     };
 
-    // Send messages with delay to avoid rate limits
     for (let i = 0; i < phoneNumbers.length; i++) {
         const phoneNumber = phoneNumbers[i];
         
@@ -109,7 +111,6 @@ async function sendBulkMessages(phoneNumbers, message) {
                 });
             }
 
-            // Add delay to avoid rate limits (1 second between messages)
             if (i < phoneNumbers.length - 1) {
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
@@ -130,43 +131,130 @@ async function sendBulkMessages(phoneNumbers, message) {
     return results;
 }
 
+// CSV UPLOAD ENDPOINT - NEW!
+app.post('/bulk-upload', upload.single('csvFile'), async (req, res) => {
+    console.log('📁 CSV upload endpoint called');
+    
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                error: 'No CSV file uploaded'
+            });
+        }
+
+        const { message } = req.body;
+        
+        if (!message) {
+            // Clean up uploaded file
+            fs.unlinkSync(req.file.path);
+            return res.status(400).json({
+                success: false,
+                error: 'Message is required'
+            });
+        }
+
+        console.log('📄 Processing CSV file:', req.file.originalname);
+        console.log('💬 Message:', message);
+
+        const phoneNumbers = [];
+        
+        // Read and parse CSV file
+        await new Promise((resolve, reject) => {
+            fs.createReadStream(req.file.path)
+                .pipe(csv())
+                .on('data', (row) => {
+                    // Extract phone numbers from CSV
+                    // Supports columns: phone, number, contact, etc.
+                    const phone = row.phone || row.number || row.contact || row.Phone || row.Number;
+                    if (phone) {
+                        // Clean phone number (remove spaces, +, etc.)
+                        const cleanPhone = phone.toString().replace(/[+\s]/g, '');
+                        phoneNumbers.push(cleanPhone);
+                    }
+                })
+                .on('end', () => {
+                    resolve();
+                })
+                .on('error', (error) => {
+                    reject(error);
+                });
+        });
+
+        // Clean up uploaded file
+        fs.unlinkSync(req.file.path);
+
+        if (phoneNumbers.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'No valid phone numbers found in CSV file'
+            });
+        }
+
+        console.log(`📊 Found ${phoneNumbers.length} numbers in CSV`);
+        
+        // Send bulk messages
+        const results = await sendBulkMessages(phoneNumbers, message);
+
+        res.json({
+            success: true,
+            summary: {
+                total: phoneNumbers.length,
+                successful: results.successful.length,
+                failed: results.failed.length
+            },
+            details: {
+                successful: results.successful,
+                failed: results.failed
+            },
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('❌ CSV upload error:', error);
+        
+        // Clean up file if it exists
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+        
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 // GET endpoint for webhook verification
 app.get('/webhook', (req, res) => {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
 
-    // Check if a token and mode were sent
     if (mode && token) {
-        // Check the mode and token sent are correct
         if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-            // Respond with 200 OK and challenge token from the request
             console.log('WEBHOOK_VERIFIED');
             res.status(200).send(challenge);
         } else {
-            // Responds with '403 Forbidden' if verify tokens do not match
             res.sendStatus(403);
         }
     }
 });
 
-// POST endpoint to receive webhook events
+// POST endpoint for webhook events
 app.post('/webhook', (req, res) => {
     const body = req.body;
 
-    // Check if this is an event from a WhatsApp Business Account
     if (body.object) {
         console.log('Received webhook:');
         console.log(JSON.stringify(body, null, 2));
 
-        // Process the webhook data here
         if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages) {
             const messages = body.entry[0].changes[0].value.messages;
             messages.forEach(message => {
                 console.log('Message received from:', message.from);
                 console.log('Message text:', message.text?.body);
                 
-                // AUTO-REPLY LOGIC
                 if (message.text && message.text.body) {
                     sendAutoReply(message.from, message.text.body)
                         .then(() => console.log('Auto-reply sent to:', message.from))
@@ -175,22 +263,19 @@ app.post('/webhook', (req, res) => {
             });
         }
 
-        // Return a '200 OK' response to all events
         res.status(200).send('EVENT_RECEIVED');
     } else {
-        // Return a '404 Not Found' if event is not from a WhatsApp Business Account
         res.sendStatus(404);
     }
 });
 
-// BULK MESSAGING ENDPOINT
+// BULK MESSAGING ENDPOINT (original)
 app.post('/bulk-send', express.json(), async (req, res) => {
     console.log('📨 Bulk send endpoint called');
     
     try {
         const { phoneNumbers, message } = req.body;
 
-        // Validate input
         if (!phoneNumbers || !message) {
             return res.status(400).json({
                 success: false,
@@ -248,11 +333,13 @@ app.get('/bulk-status', (req, res) => {
         features: [
             'Send to multiple contacts',
             'Detailed success/failure reports',
-            'Rate limiting',
-            'Real-time progress tracking'
+            'Rate limiting', 
+            'Real-time progress tracking',
+            'CSV file upload support'
         ],
         endpoints: {
             bulk_send: 'POST /bulk-send',
+            bulk_upload: 'POST /bulk-upload (CSV file)',
             status: 'GET /bulk-status',
             webhook: 'GET/POST /webhook'
         }
@@ -263,11 +350,12 @@ app.get('/bulk-status', (req, res) => {
 app.get('/', (req, res) => {
     res.json({
         message: 'WhatsApp Webhook Server is running!',
-        features: ['Auto-reply', 'Bulk Messaging', 'Webhook Handling'],
+        features: ['Auto-reply', 'Bulk Messaging', 'CSV Upload', 'Webhook Handling'],
         endpoints: {
             home: 'GET /',
             webhook: 'GET/POST /webhook', 
             bulk_send: 'POST /bulk-send',
+            bulk_upload: 'POST /bulk-upload',
             bulk_status: 'GET /bulk-status'
         }
     });
@@ -278,5 +366,6 @@ app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
     console.log(`Webhook URL: https://webhook-d484.onrender.com/webhook`);
     console.log(`Bulk SMS URL: https://webhook-d484.onrender.com/bulk-send`);
+    console.log(`CSV Upload URL: https://webhook-d484.onrender.com/bulk-upload`);
     console.log(`Bulk Status URL: https://webhook-d484.onrender.com/bulk-status`);
 });
