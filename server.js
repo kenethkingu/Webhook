@@ -16,6 +16,9 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "Ken_12345";
 // Port configuration
 const PORT = process.env.PORT || 3000;
 
+// ===== ADDED: Store latest webhook =====
+let latestWebhook = null;
+
 // AUTO-REPLY FUNCTION - USING YOUR PHONE NUMBER ID
 async function sendAutoReply(phoneNumber, receivedMessage) {
     const ACCESS_TOKEN = process.env.WHATSAPP_TOKEN;
@@ -241,6 +244,25 @@ app.get('/webhook', (req, res) => {
     }
 });
 
+// ===== ADDED: GET endpoint to retrieve latest webhook =====
+app.get('/webhook/latest', (req, res) => {
+    console.log('📨 GET /webhook/latest requested');
+    
+    if (!latestWebhook) {
+        return res.status(404).json({
+            status: 'error',
+            message: 'No webhooks received yet',
+            instructions: 'Send a WhatsApp message to trigger a webhook first'
+        });
+    }
+    
+    res.json({
+        status: 'success',
+        captured_at: latestWebhook.timestamp,
+        data: latestWebhook.data
+    });
+});
+
 // POST endpoint for webhook events
 app.post('/webhook', (req, res) => {
     const body = req.body;
@@ -248,6 +270,12 @@ app.post('/webhook', (req, res) => {
     if (body.object) {
         console.log('Received webhook:');
         console.log(JSON.stringify(body, null, 2));
+
+        // ===== ADDED: Store the latest webhook =====
+        latestWebhook = {
+            timestamp: new Date().toISOString(),
+            data: body
+        };
 
         if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages) {
             const messages = body.entry[0].changes[0].value.messages;
@@ -341,7 +369,8 @@ app.get('/bulk-status', (req, res) => {
             bulk_send: 'POST /bulk-send',
             bulk_upload: 'POST /bulk-upload (CSV file)',
             status: 'GET /bulk-status',
-            webhook: 'GET/POST /webhook'
+            webhook: 'GET/POST /webhook',
+            webhook_latest: 'GET /webhook/latest'  // ===== ADDED =====
         }
     });
 });
@@ -350,10 +379,11 @@ app.get('/bulk-status', (req, res) => {
 app.get('/', (req, res) => {
     res.json({
         message: 'WhatsApp Webhook Server is running!',
-        features: ['Auto-reply', 'Bulk Messaging', 'CSV Upload', 'Webhook Handling'],
+        features: ['Auto-reply', 'Bulk Messaging', 'CSV Upload', 'Webhook Handling', 'Webhook API'], // ===== UPDATED =====
         endpoints: {
             home: 'GET /',
             webhook: 'GET/POST /webhook', 
+            webhook_latest: 'GET /webhook/latest',  // ===== ADDED =====
             bulk_send: 'POST /bulk-send',
             bulk_upload: 'POST /bulk-upload',
             bulk_status: 'GET /bulk-status'
@@ -365,6 +395,7 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
     console.log(`Webhook URL: https://webhook-d484.onrender.com/webhook`);
+    console.log(`Webhook Latest: https://webhook-d484.onrender.com/webhook/latest`);  // ===== ADDED =====
     console.log(`Bulk SMS URL: https://webhook-d484.onrender.com/bulk-send`);
     console.log(`CSV Upload URL: https://webhook-d484.onrender.com/bulk-upload`);
     console.log(`Bulk Status URL: https://webhook-d484.onrender.com/bulk-status`);
